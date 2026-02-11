@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖奇文字獄射擊遊戲 (安全版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&display=swap');
+
+        body { 
+            font-family: 'Noto Sans TC', sans-serif; 
+            background-color: #1a1a1a; 
+            color: white;
+            overflow: hidden; 
+            cursor: none; /* 隱藏預設游標，使用準心 */
+            user-select: none;
+        }
+
+        /* 準心 */
+        #crosshair {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid #ef4444;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 100;
+        }
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: #ef4444;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+        }
+
+        /* 警笛 */
+        .siren-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(90deg, rgba(255,0,0,0.3) 0%, rgba(0,0,255,0.3) 100%);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 50;
+            mix-blend-mode: overlay;
+        }
+        .siren-active {
+            animation: siren-flash 0.5s infinite alternate;
+            opacity: 1;
+        }
+        @keyframes siren-flash {
+            0% { background: rgba(255, 0, 0, 0.4); }
+            100% { background: rgba(0, 0, 255, 0.4); }
+        }
+
+        /* 卡彈特效 */
+        #jammed-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 40;
+            justify-content: center;
+            align-items: center;
+            color: red;
+            font-size: 5rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            text-shadow: 0 0 20px red;
+            pointer-events: none;
+        }
+
+        /* 詞格 */
+        .couplet-container {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+            padding: 10px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 10px;
+            border: 1px solid #444;
+        }
+        .couplet-box {
+            font-family: 'Ma Shan Zheng', cursive;
+            background-color: #b91c1c;
+            border: 2px solid #fcd34d;
+            box-shadow: 0 0 10px rgba(185, 28, 28, 0.6);
+            color: black;
+            font-size: 1.5rem;
+            width: 3rem;
+            height: 4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.1s;
+        }
+        @media (min-width: 768px) {
+            .couplet-box {
+                width: 3.5rem;
+                height: 5rem;
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body class="w-full h-screen flex flex-col items-center justify-center relative bg-slate-900">
+
+    <div id="crosshair"></div>
+    <div id="siren" class="siren-overlay"></div>
+    <div id="jammed-overlay">卡彈 JAMMED</div>
+
+    <!-- UI Layer -->
+    <div class="absolute top-4 left-0 w-full text-center z-20 pointer-events-none">
+        <h1 class="text-4xl md:text-5xl font-black text-purple-500 drop-shadow-[0_0_15px_rgba(168,85,247,0.8)] tracking-wider">圖奇文字獄射擊遊戲</h1>
+        <p class="text-gray-300 mt-2 text-sm">湊滿 10 字過關，<span class="text-red-500 font-bold">絕對不要</span>組出禁詞！</p>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Bottom Slots -->
+    <div class="absolute bottom-4 z-20 w-full flex justify-center pointer-events-none">
+        <div id="slots-wrapper" class="couplet-container">
+            <!-- JS will populate 10 slots -->
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="result-screen" class="hidden absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center backdrop-blur-md">
+        <div id="police-badge" class="hidden text-8xl mb-4 animate-bounce">🚔👮‍♂️</div>
+        <div id="win-badge" class="hidden text-8xl mb-4 animate-pulse">🎉💰</div>
+        
+        <h2 id="result-title" class="text-5xl font-black text-white mb-4"></h2>
+        <p id="result-desc" class="text-2xl text-gray-300 mb-8 max-w-lg text-center leading-relaxed"></p>
+        
+        <div class="bg-red-700 text-black p-4 rounded-lg border-4 border-yellow-400 mb-8 transform -rotate-1 shadow-2xl">
+            <p class="text-sm text-yellow-200 text-center mb-1">您的直播紀錄</p>
+            <div id="final-couplet" class="text-3xl md:text-5xl font-['Ma_Shan_Zheng'] font-bold tracking-widest text-center bg-red-600 px-4 py-2 min-w-[300px]">
+                -------
+            </div>
+        </div>
+
+        <button onclick="startGame()" class="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xl rounded shadow-[0_0_20px_rgba(147,51,234,0.5)] transition hover:scale-105 cursor-pointer z-50 pointer-events-auto">
+            申請解 BAN (重來)
+        </button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const crosshair = document.getElementById('crosshair');
+        const slotsWrapper = document.getElementById('slots-wrapper');
+        const resultScreen = document.getElementById('result-screen');
+        const resultTitle = document.getElementById('result-title');
+        const resultDesc = document.getElementById('result-desc');
+        const finalCouplet = document.getElementById('final-couplet');
+        const policeBadge = document.getElementById('police-badge');
+        const winBadge = document.getElementById('win-badge');
+        const jammedOverlay = document.getElementById('jammed-overlay');
+        const siren = document.getElementById('siren');
+
+        // --- Assets & Config ---
+        // Basic Chars
+        const WORDS_POOL = ["NI", "GG", "ER", "你", "哥", "白", "尼", "那", "個", "內", "鴿", "黑", "貴", "鬼", "人", "死", "閣", "妮", "可", "李"];
+        // Dangerous Combos to detect
+        const DANGEROUS_COMBOS = ["NIGGER", "你哥", "哥白尼", "那個", "內閣", "黑鬼", "死黑人", "黑貴賓", "李哥", "妮哥", "妮可"];
+        
+        // Images
+        const imgOverload = new Image();
+        imgOverload.src = "https://i.meee.com.tw/nudECgJ.png"; // 超負荷
+        
+        const imgHolger = new Image();
+        imgHolger.src = "https://memeprod.sgp1.digitaloceanspaces.com/user-resource/16f637208bc9af2eff3410441e486e3e.png"; // 館長
+
+        // Game State
+        let enemies = [];
+        let particles = [];
+        let collectedWords = [];
+        let gameRunning = false;
+        let frame = 0;
+        let mouseX = 0;
+        let mouseY = 0;
+        let gunAngle = 0;
+        let canShoot = true;
+        let jamTimer = 0;
+
+        // Init Slots
+        const SLOT_COUNT = 10;
+        for(let i=0; i<SLOT_COUNT; i++) {
+            const div = document.createElement('div');
+            div.className = 'couplet-box';
+            div.id = `slot-${i}`;
+            slotsWrapper.appendChild(div);
+        }
+        const slots = Array.from({length: SLOT_COUNT}, (_, i) => document.getElementById(`slot-${i}`));
+
+        // Resize
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Mouse Tracker
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            crosshair.style.left = mouseX + 'px';
+            crosshair.style.top = mouseY + 'px';
+
+            // Calc Gun Angle (Gun is at bottom center)
+            const gunX = canvas.width / 2;
+            const gunY = canvas.height - 50;
+            gunAngle = Math.atan2(mouseY - gunY, mouseX - gunX);
+        });
+
+        // Click to Shoot
+        window.addEventListener('mousedown', () => {
+            if (!gameRunning) return;
+            if (!canShoot) return;
+
+            // Check hits
+            let hit = false;
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let e = enemies[i];
+                if (isMouseInRect(mouseX, mouseY, e)) {
+                    hitEnemy(e, i);
+                    hit = true;
+                    break; 
+                }
+            }
+
+            // Gunfire effect
+            createExplosion(mouseX, mouseY, '#ffff00', 5);
+        });
+
+        function isMouseInRect(mx, my, rect) {
+            return mx >= rect.x && mx <= rect.x + rect.width &&
+                   my >= rect.y && my <= rect.y + rect.height;
+        }
+
+        // --- Classes ---
+
+        class Enemy {
+            constructor() {
+                // Type: 0=Char, 1=BlackPoodle, 2=BlackMan, 3=Overload, 4=Holger
+                const rand = Math.random();
+                if (rand < 0.75) this.type = 0; // Text
+                else if (rand < 0.82) this.type = 1; // Poodle
+                else if (rand < 0.89) this.type = 2; // Black Man
+                else if (rand < 0.95) this.type = 3; // Overload
+                else this.type = 4; // Holger
+
+                this.width = 60;
+                this.height = 60;
+                this.x = Math.random() * (canvas.width - this.width);
+                this.y = -80;
+                this.baseSpeed = 2 + Math.random() * 3;
+                this.rotation = 0;
+
+                // Content setup
+                if (this.type === 0) {
+                    this.content = WORDS_POOL[Math.floor(Math.random() * WORDS_POOL.length)];
+                    this.color = this.getRandomColor();
+                } else if (this.type === 1) {
+                    this.content = "🐩"; // Poodle
+                } else if (this.type === 2) {
+                    this.content = "🧔🏿"; // Black Man
+                } else if (this.type === 3) {
+                    this.img = imgOverload;
+                } else if (this.type === 4) {
+                    this.img = imgHolger;
+                }
+
+                // Movement Behavior (Randomized)
+                this.moveType = Math.floor(Math.random() * 4); // 0=Straight, 1=Sine, 2=Teleport, 3=Erratic
+                this.timer = 0;
+            }
+
+            getRandomColor() {
+                const colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#ffffff'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            update() {
+                this.timer++;
+
+                // Movement Logic
+                switch(this.moveType) {
+                    case 0: // Straight
+                        this.y += this.baseSpeed;
+                        break;
+                    case 1: // Sine
+                        this.y += this.baseSpeed;
+                        this.x += Math.sin(this.y / 50) * 3;
+                        break;
+                    case 2: // Teleport (Goku style)
+                        if (this.timer % 60 === 0 && Math.random() > 0.5) {
+                            this.x = Math.random() * (canvas.width - this.width);
+                            this.y += 50;
+                            createExplosion(this.x, this.y, '#fff', 5);
+                        } else {
+                            this.y += this.baseSpeed * 0.5;
+                        }
+                        break;
+                    case 3: // Erratic / Magic Ball
+                        this.y += this.baseSpeed;
+                        this.x += Math.cos(this.timer * 0.1) * 8;
+                        this.rotation += 0.1;
+                        break;
+                }
+
+                // Bounds
+                if (this.x < 0) this.x = 0;
+                if (this.x > canvas.width - this.width) this.x = canvas.width - this.width;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.width/2, this.y + this.height/2);
+                ctx.rotate(this.rotation);
+
+                if (this.type === 0) {
+                    ctx.font = "bold 40px 'Noto Sans TC'";
+                    ctx.fillStyle = this.color;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.shadowColor = this.color;
+                    ctx.shadowBlur = 15;
+                    ctx.fillText(this.content, 0, 0);
+                } else if (this.type === 1 || this.type === 2) {
+                    ctx.font = "50px Arial";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(this.content, 0, 0);
+                } else {
+                    // Images (Overload or Holger)
+                    if (this.img && this.img.complete) {
+                        ctx.drawImage(this.img, -this.width/2, -this.height/2, this.width, this.height);
+                    } else {
+                        ctx.font = "12px Arial";
+                        ctx.fillStyle = "white";
+                        ctx.fillText(this.type === 3 ? "超" : "館", 0, 0);
+                    }
+                }
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color, isText=false, text="") {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 15;
+                this.vy = (Math.random() - 0.5) * 15;
+                this.life = 1.0;
+                this.color = color;
+                this.isText = isText;
+                this.text = text;
+                this.scale = 1;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= 0.03;
+                if (this.isText) this.scale += 0.1;
+            }
+            draw() {
+                ctx.globalAlpha = Math.max(0, this.life);
+                if (this.isText) {
+                    ctx.font = `bold ${30 * this.scale}px Arial`;
+                    ctx.fillStyle = this.color;
+                    ctx.fillText(this.text, this.x, this.y);
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // --- Logic ---
+
+        function createExplosion(x, y, color, count=10) {
+            for(let i=0; i<count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function createTextEffect(x, y, text, color) {
+            particles.push(new Particle(x, y, color, true, text));
+        }
+
+        function hitEnemy(e, index) {
+            // Special reaction for Holger
+            if (e.type === 4) {
+                createTextEffect(e.x, e.y, "RRR!!!!", "red");
+            }
+            createExplosion(e.x + e.width/2, e.y + e.height/2, '#fff', 20);
+            enemies.splice(index, 1);
+        }
+
+        function checkPotentialBan(newChars) {
+            // Construct what the string WOULD be
+            const futureString = collectedWords.join("") + newChars.join("");
+            
+            // Check illegal substrings
+            for (let bad of DANGEROUS_COMBOS) {
+                if (futureString.includes(bad)) {
+                    return true;
+                }
+            }
+            // Simple check for NI-GG-ER variations
+            if (futureString.includes("NIGG") || futureString.includes("IGER")) {
+                 return true;
+            }
+            return false;
+        }
+
+        function addToSlots(chars) {
+            // SAFE GUARD: Check BEFORE adding
+            if (checkPotentialBan(chars)) {
+                // If it creates a ban, DO NOT add to slots.
+                // Immediately trigger Game Over
+                gameOver(false, "危險字詞 (已屏蔽)");
+                return;
+            }
+
+            // If safe, add to array
+            for (let c of chars) {
+                if (collectedWords.length < SLOT_COUNT) {
+                    collectedWords.push(c);
+                }
+            }
+            updateSlotsUI();
+            
+            // Check Win
+            if (collectedWords.length === SLOT_COUNT) {
+                gameOver(true, collectedWords.join(""));
+            }
+        }
+
+        function removeFromSlots() {
+            if (collectedWords.length > 0) {
+                const removed = collectedWords.pop();
+                createTextEffect(canvas.width/2, canvas.height - 150, `吞了 ${removed}!`, "#ec4899");
+                updateSlotsUI();
+            }
+        }
+
+        function updateSlotsUI() {
+            slots.forEach((slot, index) => {
+                slot.innerText = collectedWords[index] || "";
+                if (collectedWords[index]) {
+                    slot.style.backgroundColor = '#b91c1c'; // Red
+                } else {
+                    slot.style.backgroundColor = '#7f1d1d'; // Darker Red
+                }
+            });
+        }
+
+        function triggerJam() {
+            canShoot = false;
+            jamTimer = 180; // 3 seconds at 60fps
+            jammedOverlay.style.display = 'flex';
+        }
+
+        function updateGame() {
+            if (!gameRunning) return;
+            frame++;
+
+            // Jam Timer
+            if (!canShoot) {
+                jamTimer--;
+                if (jamTimer <= 0) {
+                    canShoot = true;
+                    jammedOverlay.style.display = 'none';
+                }
+            }
+
+            // Spawn
+            let spawnRate = 40;
+            if (frame % spawnRate === 0) {
+                enemies.push(new Enemy());
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Gun
+            drawGun();
+
+            // Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.update();
+                p.draw();
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            // Enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let e = enemies[i];
+                e.update();
+                e.draw();
+
+                // Hit Bottom
+                if (e.y > canvas.height - 120) {
+                    // Logic based on type
+                    if (e.type === 0) {
+                        addToSlots([e.content]);
+                    } else if (e.type === 1) { // Poodle
+                        addToSlots(["貴", "賓"]); // Safe update: Poodle adds "貴賓"
+                    } else if (e.type === 2) { // Black Man
+                        addToSlots(["黑"]); // Safe update: Black Man adds "黑"
+                    } else if (e.type === 3) { // Overload
+                        removeFromSlots();
+                    } else if (e.type === 4) { // Holger
+                        triggerJam();
+                    }
+                    
+                    enemies.splice(i, 1);
+                    if (!gameRunning) return; 
+                }
+            }
+
+            requestAnimationFrame(updateGame);
+        }
+
+        function drawGun() {
+            const centerX = canvas.width / 2;
+            const bottomY = canvas.height;
+            
+            ctx.save();
+            ctx.translate(centerX, bottomY - 30);
+            ctx.rotate(gunAngle); // Point to mouse
+            
+            // Gun Body
+            ctx.fillStyle = '#6b7280';
+            ctx.fillRect(0, -10, 60, 20); // Barrel
+            ctx.fillStyle = '#374151';
+            ctx.fillRect(-10, -15, 20, 30); // Base
+            
+            // Laser sight
+            ctx.beginPath();
+            ctx.moveTo(60, 0);
+            ctx.lineTo(1000, 0);
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.2)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function gameOver(win, reason) {
+            gameRunning = false;
+            resultScreen.classList.remove('hidden');
+            
+            // Safe Display for stream
+            if (!win) {
+                 finalCouplet.innerText = "⛔ BANNED ⛔";
+                 finalCouplet.className = "text-3xl md:text-5xl font-['Ma_Shan_Zheng'] font-bold tracking-widest text-center bg-black text-red-500 px-4 py-2 min-w-[300px]";
+            } else {
+                 finalCouplet.innerText = collectedWords.join(" ") || "......";
+                 finalCouplet.className = "text-3xl md:text-5xl font-['Ma_Shan_Zheng'] font-bold tracking-widest text-center bg-red-600 px-4 py-2 min-w-[300px]";
+            }
+
+            if (win) {
+                winBadge.classList.remove('hidden');
+                policeBadge.classList.add('hidden');
+                resultTitle.innerText = "安全過關！";
+                resultTitle.className = "text-5xl font-black text-yellow-400 mb-4";
+                resultDesc.innerText = `太神啦！你成功閃過了所有地雷，這條對聯非常清白！`;
+                siren.classList.remove('siren-active');
+            } else {
+                winBadge.classList.add('hidden');
+                policeBadge.classList.remove('hidden');
+                resultTitle.innerText = "你被圖奇 BAN 了";
+                resultTitle.className = "text-6xl font-black text-red-600 mb-4 animate-pulse";
+                // Safe reason display
+                resultDesc.innerHTML = `違規原因：仇恨言論<br>偵測到違禁詞 <span class="text-red-500 font-bold text-4xl">***</span>`;
+                siren.classList.add('siren-active');
+            }
+            
+            // Reset cursor
+            document.body.style.cursor = 'default';
+        }
+
+        function startGame() {
+            gameRunning = true;
+            enemies = [];
+            particles = [];
+            collectedWords = [];
+            frame = 0;
+            canShoot = true;
+            
+            resultScreen.classList.add('hidden');
+            siren.classList.remove('siren-active');
+            jammedOverlay.style.display = 'none';
+            updateSlotsUI();
+            
+            // Hide system cursor, use custom crosshair
+            document.body.style.cursor = 'none';
+            
+            updateGame();
+        }
+
+        // Start
+        startGame();
+
+    </script>
+</body>
+</html>
