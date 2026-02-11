@@ -127,7 +127,7 @@
             <p class="text-gray-200 text-lg font-bold">只能用安全的字組出春聯！湊滿 10 字過關！</p>
             <p class="text-red-400 text-sm mt-1 font-bold">警告：絕對不要組出禁詞！</p>
             <div class="text-gray-400 text-xs mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 text-left">
-                <span>👹 超負荷觸底：吃掉一個已收集的字</span>
+                <span>👹 超負荷觸底：<span class="text-red-300 font-bold">清空</span>所有已收集的字</span>
                 <span>💪 館長觸底：槍枝卡彈 3 秒</span>
             </div>
         </div>
@@ -177,8 +177,8 @@
         const siren = document.getElementById('siren');
 
         // --- Assets & Config ---
-        // Basic Chars
-        const WORDS_POOL = ["NI", "GG", "ER", "你", "哥", "白", "尼", "那", "個", "內", "鴿", "黑", "貴", "鬼", "人", "死", "閣", "妮", "可", "李"];
+        // Basic Chars (Exactly as requested)
+        const WORDS_POOL = ["NI", "GG", "ER", "你", "哥", "白", "尼", "那", "個", "內", "鴿", "黑", "鬼", "人", "死", "閣", "妮", "可", "李"];
         // Dangerous Combos to detect
         const DANGEROUS_COMBOS = ["NIGGER", "你哥", "哥白尼", "那個", "內閣", "黑鬼", "死黑人", "黑貴賓", "李哥", "妮哥", "妮可", "內個"];
         
@@ -200,8 +200,10 @@
         let gunAngle = 0;
         let canShoot = true;
         let jamTimer = 0;
-        // 判定線高度 (Trigger Line Y)
         let triggerLineY = 0;
+
+        // Word Bag System for Even Distribution
+        let wordBag = [];
 
         // Init Slots
         const SLOT_COUNT = 10;
@@ -229,7 +231,6 @@
             crosshair.style.left = mouseX + 'px';
             crosshair.style.top = mouseY + 'px';
 
-            // Calc Gun Angle (Gun is at bottom center)
             const gunX = canvas.width / 2;
             const gunY = canvas.height - 50;
             gunAngle = Math.atan2(mouseY - gunY, mouseX - gunX);
@@ -240,7 +241,6 @@
             if (!gameRunning) return;
             if (!canShoot) return;
 
-            // Check hits
             let hit = false;
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let e = enemies[i];
@@ -251,7 +251,6 @@
                 }
             }
 
-            // Gunfire effect
             createExplosion(mouseX, mouseY, '#ffff00', 5);
         });
 
@@ -260,17 +259,67 @@
                    my >= rect.y && my <= rect.y + rect.height;
         }
 
+        // --- Word Bag Logic ---
+        function getNextWord() {
+            // Check active enemies to avoid duplicates falling at same time if possible
+            // This is a soft constraint for chaos
+            
+            if (wordBag.length === 0) {
+                // Refill and shuffle
+                wordBag = [...WORDS_POOL];
+                // Fisher-Yates Shuffle
+                for (let i = wordBag.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [wordBag[i], wordBag[j]] = [wordBag[j], wordBag[i]];
+                }
+            }
+
+            // Try to find a word that is not currently on screen
+            // If all in bag are on screen (unlikely given pool size), just take pop
+            let activeChars = enemies.filter(e => e.type === 0).map(e => e.content);
+            
+            // Find first word in bag that is not active
+            let index = wordBag.findIndex(w => !activeChars.includes(w));
+            
+            if (index !== -1) {
+                // Remove and return
+                return wordBag.splice(index, 1)[0];
+            } else {
+                // Just pop the last one
+                return wordBag.pop();
+            }
+        }
+
+        // --- Spawn Weights Logic ---
+        function getSpawnType() {
+            // Weights:
+            // Text: High (Base game)
+            // Poodle: Low
+            // BlackMan: Low
+            // Overload: High Special (2x)
+            // Holger: High Special (2x)
+            
+            // Let's define probabilities out of 100
+            // Text: 60%
+            // Poodle: 5%
+            // BlackMan: 5%
+            // Overload: 15%
+            // Holger: 15%
+            
+            const rand = Math.random() * 100;
+            
+            if (rand < 60) return 0; // Text
+            if (rand < 65) return 1; // Poodle
+            if (rand < 70) return 2; // BlackMan
+            if (rand < 85) return 3; // Overload
+            return 4; // Holger
+        }
+
         // --- Classes ---
 
         class Enemy {
             constructor() {
-                // Type: 0=Char, 1=BlackPoodle, 2=BlackMan, 3=Overload, 4=Holger
-                const rand = Math.random();
-                if (rand < 0.75) this.type = 0; // Text
-                else if (rand < 0.82) this.type = 1; // Poodle
-                else if (rand < 0.89) this.type = 2; // Black Man
-                else if (rand < 0.95) this.type = 3; // Overload
-                else this.type = 4; // Holger
+                this.type = getSpawnType();
 
                 this.width = 60;
                 this.height = 60;
@@ -281,7 +330,7 @@
 
                 // Content setup
                 if (this.type === 0) {
-                    this.content = WORDS_POOL[Math.floor(Math.random() * WORDS_POOL.length)];
+                    this.content = getNextWord();
                     this.color = this.getRandomColor();
                 } else if (this.type === 1) {
                     this.content = "🐩"; // Poodle
@@ -352,13 +401,11 @@
                     ctx.shadowBlur = 15;
                     ctx.fillText(this.content, 0, 0);
                 } else if (this.type === 1 || this.type === 2) {
-                    // Emojis don't use BiauKai but let's keep font setting consistent
                     ctx.font = "50px serif"; 
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
                     ctx.fillText(this.content, 0, 0);
                 } else {
-                    // Images (Overload or Holger)
                     if (this.img && this.img.complete) {
                         ctx.drawImage(this.img, -this.width/2, -this.height/2, this.width, this.height);
                     } else {
@@ -392,7 +439,6 @@
             draw() {
                 ctx.globalAlpha = Math.max(0, this.life);
                 if (this.isText) {
-                    // Particle Text also BiauKai
                     ctx.font = `bold ${30 * this.scale}px 'BiauKai', 'DFKai-SB', serif`;
                     ctx.fillStyle = this.color;
                     ctx.fillText(this.text, this.x, this.y);
@@ -419,7 +465,6 @@
         }
 
         function hitEnemy(e, index) {
-            // Special reaction for Holger
             if (e.type === 4) {
                 createTextEffect(e.x, e.y, "RRR!!!!", "red");
             }
@@ -428,16 +473,13 @@
         }
 
         function checkPotentialBan(newChars) {
-            // Construct what the string WOULD be
             const futureString = collectedWords.join("") + newChars.join("");
             
-            // Check illegal substrings
             for (let bad of DANGEROUS_COMBOS) {
                 if (futureString.includes(bad)) {
                     return true;
                 }
             }
-            // Simple check for NI-GG-ER variations
             if (futureString.includes("NIGG") || futureString.includes("IGER")) {
                  return true;
             }
@@ -445,7 +487,6 @@
         }
 
         function addToSlots(chars) {
-            // Check for potential ban if we add these chars
             const futureString = collectedWords.join("") + chars.join("");
             let bannedWord = null;
             for (let bad of DANGEROUS_COMBOS) {
@@ -459,12 +500,10 @@
             }
 
             if (bannedWord) {
-                // Trigger Game Over
                 gameOver(false, bannedWord);
                 return;
             }
 
-            // If safe, add to array
             for (let c of chars) {
                 if (collectedWords.length < SLOT_COUNT) {
                     collectedWords.push(c);
@@ -472,18 +511,15 @@
             }
             updateSlotsUI();
             
-            // Check Win
             if (collectedWords.length === SLOT_COUNT) {
                 gameOver(true, collectedWords.join(""));
             }
         }
 
-        function removeFromSlots() {
-            if (collectedWords.length > 0) {
-                const removed = collectedWords.pop();
-                createTextEffect(canvas.width/2, canvas.height - 150, `吃掉了 ${removed}!`, "#ec4899");
-                updateSlotsUI();
-            }
+        function clearAllSlots() {
+            collectedWords = []; // Clear ALL
+            createTextEffect(canvas.width/2, canvas.height - 150, `全部吃掉了!`, "#ec4899");
+            updateSlotsUI();
         }
 
         function updateSlotsUI() {
@@ -507,7 +543,6 @@
             if (!gameRunning) return;
             frame++;
 
-            // Jam Timer
             if (!canShoot) {
                 jamTimer--;
                 if (jamTimer <= 0) {
@@ -528,21 +563,18 @@
             ctx.beginPath();
             ctx.moveTo(0, triggerLineY);
             ctx.lineTo(canvas.width, triggerLineY);
-            ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; // Red dashed line
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
             ctx.setLineDash([15, 15]);
             ctx.lineWidth = 3;
             ctx.stroke();
             ctx.setLineDash([]);
             
-            // Draw Line Text
             ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
             ctx.font = "bold 16px 'BiauKai', serif";
             ctx.fillText("判定線 (勿觸碰危險字)", 20, triggerLineY - 10);
 
-            // Draw Gun
             drawGun();
 
-            // Particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 let p = particles[i];
                 p.update();
@@ -550,15 +582,12 @@
                 if (p.life <= 0) particles.splice(i, 1);
             }
 
-            // Enemies
             for (let i = enemies.length - 1; i >= 0; i--) {
                 let e = enemies[i];
                 e.update();
                 e.draw();
 
-                // Hit Trigger Line
                 if (e.y > triggerLineY) {
-                    // Logic based on type
                     if (e.type === 0) {
                         addToSlots([e.content]);
                     } else if (e.type === 1) { // Poodle
@@ -566,7 +595,7 @@
                     } else if (e.type === 2) { // Black Man
                         addToSlots(["黑"]);
                     } else if (e.type === 3) { // Overload
-                        removeFromSlots();
+                        clearAllSlots();
                     } else if (e.type === 4) { // Holger
                         triggerJam();
                     }
@@ -585,15 +614,13 @@
             
             ctx.save();
             ctx.translate(centerX, bottomY - 30);
-            ctx.rotate(gunAngle); // Point to mouse
+            ctx.rotate(gunAngle);
             
-            // Gun Body
             ctx.fillStyle = '#6b7280';
-            ctx.fillRect(0, -10, 60, 20); // Barrel
+            ctx.fillRect(0, -10, 60, 20); 
             ctx.fillStyle = '#374151';
-            ctx.fillRect(-10, -15, 20, 30); // Base
+            ctx.fillRect(-10, -15, 20, 30); 
             
-            // Laser sight
             ctx.beginPath();
             ctx.moveTo(60, 0);
             ctx.lineTo(1000, 0);
@@ -628,12 +655,10 @@
                 policeBadge.classList.remove('hidden');
                 resultTitle.innerText = "你被圖奇 BAN 了";
                 resultTitle.className = "text-6xl font-black text-red-600 mb-4 animate-pulse";
-                // Show reason
                 resultDesc.innerHTML = `違規原因：仇恨言論<br>偵測到違禁詞 <span class="text-red-500 font-bold text-4xl">"${reason}"</span>`;
                 siren.classList.add('siren-active');
             }
             
-            // Reset cursor
             document.body.style.cursor = 'default';
         }
 
@@ -642,6 +667,7 @@
             enemies = [];
             particles = [];
             collectedWords = [];
+            wordBag = []; // Reset bag
             frame = 0;
             canShoot = true;
             
@@ -650,13 +676,11 @@
             jammedOverlay.style.display = 'none';
             updateSlotsUI();
             
-            // Hide system cursor, use custom crosshair
             document.body.style.cursor = 'none';
             
             updateGame();
         }
 
-        // Start
         startGame();
 
     </script>
